@@ -9,6 +9,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Nöbetçi Eczane" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   
   <!-- Tailwind CSS (derlenip gomulmustur, harici CDN'e bagimli degildir) -->
   <style>
@@ -95,13 +98,9 @@
 
     <!-- Top Right Actions -->
     <div class="flex items-center gap-1.5">
-      <button onclick="openEmergencyModal()" title="112 Acil Yardım" class="flex items-center justify-center px-2.5 py-1.5 rounded-full bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/50 text-rose-400 text-xs font-bold transition-all active:scale-95">
-        <span class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping mr-1"></span>
-        <span>112</span>
-      </button>
-
-      <button onclick="getUserGPS()" title="Mevcut Konumumu Bul (GPS)" class="flex items-center justify-center w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 transition-all active:scale-95">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="3 11 22 2 13 21 11 13 3 11" stroke-width="2" stroke-linejoin="round"></polygon></svg>
+      <button onclick="getUserGPS()" title="Mevcut Konumumu Bul (GPS)" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700/80 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="3 11 22 2 13 21 11 13 3 11" stroke-width="2" stroke-linejoin="round"></polygon></svg>
+        <span>Konumum</span>
       </button>
     </div>
   </header>
@@ -1007,18 +1006,51 @@
 
     // ================= GPS & 81-CITY LOCATION =================
     // Nöbetçi eczane API'si il/ilçe adı ister, ham GPS koordinatı kabul etmez.
-    // Bu yüzden GPS'ten sonra OpenStreetMap Nominatim ile (anahtarsız, adres bazlı)
-    // ters coğrafi kodlama yapıyoruz. Not: Nominatim'in kullanım politikası gereği
-    // yoğun/ticari kullanımda kendi geocoding sağlayıcınızı kullanmanız önerilir.
+    // ÖNCEKİ YAKLAŞIM: OpenStreetMap Nominatim ile ters coğrafi kodlama yapıp
+    // dönen il/ilçe adını doğrudan API'ye gönderiyorduk. Sorun: Nominatim'in
+    // döndürdüğü isim (mahalle/county/state gibi farklı alanlardan seçiliyor)
+    // CITIES_DATA'daki resmi il/ilçe isimleriyle birebir eşleşmiyordu, bu da
+    // "veri alınamadı" hatasına yol açıyordu.
+    // YENİ YAKLAŞIM: Nominatim'den gelen ismi API'ye göndermek yerine, ham GPS
+    // koordinatını CITIES_DATA'daki 81 ilin tüm ilçelerine (lat/lng) haversine
+    // mesafesiyle kıyaslayıp en yakın bilinen ilçeyi buluyoruz. Böylece API'ye
+    // giden isim HER ZAMAN CITIES_DATA ile birebir aynı oluyor.
+    function haversineKm(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function findNearestDistrict(lat, lng) {
+      let best = null;
+      let bestDist = Infinity;
+      for (const cityEntry of CITIES_DATA) {
+        for (const d of cityEntry.districts) {
+          const dist = haversineKm(lat, lng, d.lat, d.lng);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { city: cityEntry.city, district: d.name, distanceKm: dist };
+          }
+        }
+      }
+      return best;
+    }
+
+    // Nominatim, sadece ekranda gösterilecek okunabilir bir yer adı elde etmek
+    // için hâlâ kullanılabilir; ama API çağrısına ASLA bu isim gönderilmiyor.
     async function reverseGeocodeToCityDistrict(lat, lng) {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1&accept-language=tr`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1&accept-language=tr`);
         if (!res.ok) return null;
         const data = await res.json();
         const addr = data && data.address;
         if (!addr) return null;
         const city = addr.province || addr.city || addr.state || null;
-        const district = addr.town || addr.county || addr.district || addr.suburb || city;
+        const district = addr.suburb || addr.district || addr.town || addr.county || city;
         if (!city) return null;
         return { city, district: district || city };
       } catch (err) {
@@ -1038,7 +1070,9 @@
         document.getElementById('loc-text').textContent = 'Konum belirleniyor...';
         setDataStatus('loading');
 
-        const place = await reverseGeocodeToCityDistrict(lat, lng);
+        // API'ye gönderilecek il/ilçe ismi ARTIK Nominatim'den değil,
+        // CITIES_DATA içindeki en yakın noktadan geliyor -> her zaman eşleşir.
+        const place = findNearestDistrict(lat, lng);
         if (!place) {
           setDataStatus('network-error');
           document.getElementById('loc-text').textContent = 'Konum çözülemedi';
@@ -1046,7 +1080,10 @@
         }
 
         userLocation = { lat, lng, city: place.city, district: place.district };
-        document.getElementById('loc-text').textContent = `${place.city}, ${place.district} (GPS)`;
+        const distTxt = place.distanceKm < 1
+          ? `${Math.round(place.distanceKm * 1000)} m`
+          : `${place.distanceKm.toFixed(1)} km`;
+        document.getElementById('loc-text').textContent = `${place.city}, ${place.district} (GPS, en yakın ~${distTxt})`;
         updateUserMarker();
         await loadPharmaciesForLocation();
         renderPharmacyMarkers();
@@ -1058,6 +1095,10 @@
         map.flyTo([userLocation.lat, userLocation.lng], 15);
       }, (err) => {
         alert('Konum izni alınamadı. Lütfen listeden il/ilçe seçin.');
+      }, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
       });
     }
 
@@ -1133,6 +1174,14 @@
     }
 
     window.onload = initMap;
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js').catch((err) => {
+          console.error('Service worker kaydı başarısız:', err);
+        });
+      });
+    }
   </script>
 </body>
 </html>
