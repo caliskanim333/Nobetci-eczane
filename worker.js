@@ -131,6 +131,6 @@ export default {
       ctx.waitUntil(cache.put(cacheKey, toCache));
     }
 
-    return response; } };
+    return response;
   }
 };
