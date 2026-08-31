@@ -1,9 +1,15 @@
 // ================= Nöbetçi Eczane - Cloudflare Worker =================
 // Görevi: frontend'den gelen il/ilce isteğini alıp Nosyapi'nin
 // "Nöbetçi Eczane API"sine iletmek. (https://www.nosyapi.com/api/nobetci-eczane)
-// API_KEY (Nosyapi anahtarınız) ve APP_TOKEN (frontend'in gönderdiği basit
-// istek doğrulama değeri) Cloudflare Dashboard > Settings > Variables
-// bölümünde "Secret" olarak tanımlanmış olmalı: env.API_KEY, env.APP_TOKEN
+//
+// Cloudflare Dashboard > Settings > Variables and Secrets bölümünde
+// tanımlanmış olması gerekenler:
+//   - API_KEY       (Secret)  -> Nosyapi anahtarınız
+//   - APP_TOKEN     (Secret)  -> frontend'in gönderdiği basit istek doğrulama değeri
+//   - ALLOWED_ORIGIN (Variable, secret olmasına gerek yok) ->
+//       izin verilen origin(ler). Birden fazlaysa virgülle ayırın, örn:
+//       "https://nobetci-eczane-takip.netlify.app,http://localhost:8888"
+//       NOT: Sonunda "/" OLMAMALI — Origin header'ı asla path/slash içermez.
 
 const CACHE_TTL_SECONDS = 300;       // Aynı il/ilce için 5 dakika cache
 const RATE_LIMIT_MAX = 30;           // IP başına dakikada izin verilen istek
@@ -14,20 +20,32 @@ const RATE_LIMIT_WINDOW_MS = 60_000; // 1 dakika
 // senaryolarına karşı ucuz ve etkili bir ilk savunma katmanıdır.
 const rateLimitStore = new Map();
 
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type, x-app-token',
-  };
+function getAllowedOrigins(env) {
+  return (env.ALLOWED_ORIGIN || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, '')) // sonda kalan "/" varsa temizle
+    .filter(Boolean);
 }
 
-function jsonResponse(body, status = 200) {
+// CORS header'larını sadece istek gerçekten izinli bir origin'den geldiyse
+// o origin'e özel olarak döndürüyoruz (wildcard '*' değil). Bu sayede
+// tarayıcı, yanıtı sadece izinli sitenin JS'ine okutur.
+function corsHeaders(origin) {
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'content-type, x-app-token',
+    'Vary': 'Origin',
+  };
+  if (origin) headers['Access-Control-Allow-Origin'] = origin;
+  return headers;
+}
+
+function jsonResponse(body, status, origin) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      ...corsHeaders(),
+      ...corsHeaders(origin),
     },
   });
 }
@@ -60,18 +78,38 @@ function cleanupRateLimitStore() {
 
 export default {
   async fetch(request, env, ctx) {
+    const requestOrigin = (request.headers.get('origin') || '').replace(/\/$/, '');
+    const allowedOrigins = getAllowedOrigins(env);
+    const originAllowed = requestOrigin && allowedOrigins.includes(requestOrigin);
+    // CORS header'larına yazacağımız origin: sadece izinliyse geri yansıtıyoruz.
+    const echoOrigin = originAllowed ? requestOrigin : null;
+
     if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders() });
+      // Preflight isteği. İzinli değilse CORS header'ı vermeden 403 dönüyoruz
+      // ki tarayıcı asıl isteği hiç göndermesin.
+      if (!originAllowed) {
+        return new Response(null, { status: 403 });
+      }
+      return new Response(null, { headers: corsHeaders(echoOrigin) });
     }
 
     if (request.method !== 'GET') {
-      return jsonResponse({ success: false, message: 'Sadece GET destekleniyor' }, 405);
+      return jsonResponse({ success: false, message: 'Sadece GET destekleniyor' }, 405, echoOrigin);
     }
 
-    // ---- 1) Basit istek doğrulama (gizli anahtar değil, bot filtresi) ----
+    // ---- 0) Origin kontrolü ----
+    // Not: Origin/Referer header'ları teorik olarak sahtelenebilir (örn. curl
+    // ile), bu yüzden tek başına kesin bir güvenlik sınırı değildir. Ama
+    // tarayıcıda çalışan gerçek isteklerde sahtelenemez ve rastgele
+    // bot/kazıma trafiğinin büyük kısmını burada eleriz.
+    if (!originAllowed) {
+      return jsonResponse({ success: false, message: 'Yetkisiz origin' }, 403, null);
+    }
+
+    // ---- 1) Basit istek doğrulama (ikinci katman, bot filtresi) ----
     const appToken = request.headers.get('x-app-token');
     if (!appToken || appToken !== env.APP_TOKEN) {
-      return jsonResponse({ success: false, message: 'Yetkisiz istek' }, 401);
+      return jsonResponse({ success: false, message: 'Yetkisiz istek' }, 401, echoOrigin);
     }
 
     // ---- 2) IP başına hız sınırı ----
@@ -79,7 +117,8 @@ export default {
     if (isRateLimited(ip)) {
       return jsonResponse(
         { success: false, message: 'Çok fazla istek gönderildi, lütfen biraz bekleyin.' },
-        429
+        429,
+        echoOrigin
       );
     }
     ctx.waitUntil(Promise.resolve().then(cleanupRateLimitStore));
@@ -90,7 +129,7 @@ export default {
     const ilce = url.searchParams.get('ilce');
 
     if (!il) {
-      return jsonResponse({ success: false, message: 'il parametresi zorunlu' }, 400);
+      return jsonResponse({ success: false, message: 'il parametresi zorunlu' }, 400, echoOrigin);
     }
 
     // ---- 4) Cache kontrolü (Cloudflare Cache API) ----
@@ -100,6 +139,7 @@ export default {
     if (response) {
       const cached = new Response(response.body, response);
       cached.headers.set('x-cache', 'HIT');
+      cached.headers.set('Access-Control-Allow-Origin', echoOrigin);
       return cached;
     }
 
@@ -128,7 +168,8 @@ export default {
     } catch (err) {
       return jsonResponse(
         { success: false, message: 'Nosyapi isteği başarısız: ' + err.message },
-        502
+        502,
+        echoOrigin
       );
     }
 
@@ -146,7 +187,7 @@ export default {
         'content-type': 'application/json; charset=utf-8',
         'x-cache': 'MISS',
         'cache-control': `public, max-age=${CACHE_TTL_SECONDS}`,
-        ...corsHeaders(),
+        ...corsHeaders(echoOrigin),
       },
     });
 
