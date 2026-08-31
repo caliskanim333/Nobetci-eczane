@@ -442,19 +442,31 @@
 
       const il = normalizeTr(city);
       const ilce = normalizeTr(cleanDistrictName(district));
-      // GEÇİCİ TEST: CollectAPI'nin CORS izni vermemesi nedeniyle tarayıcıdan
-      // doğrudan çağrı engelleniyor. Bu, isteği bir CORS proxy üzerinden
-      // yönlendirerek engeli aşan geçici bir test amaçlıdır; kalıcı çözüm
-      // kendi sunucu/proxy'nizi kurmaktır.
+      // Kendi Cloudflare Worker'ımız üzerinden CollectAPI'ye istek atıyoruz.
+      // API anahtarı artık frontend'de değil, worker'ın env.API_KEY secret'ında.
       const realUrl = `https://api.collectapi.com/health/dutyPharmacy?il=${encodeURIComponent(il)}&ilce=${encodeURIComponent(ilce)}`;
-const url = `https://ancient-dream-01d5.caliskanim333.workers.dev/?url=${encodeURIComponent(realUrl)}`;
+      const url = `https://ancient-dream-01d5.caliskanim333.workers.dev/?url=${encodeURIComponent(realUrl)}`;
 
-try {
-  const res = await fetch(url, {
-    headers: {
-      'content-type': 'application/json'
-    }
-  });
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'content-type': 'application/json'
+          }
+        });
+
+        if (!res.ok) {
+          // GEÇİCİ DEBUG: gerçek hatayı görmek için. Sorun çözülünce bu satırı silin.
+          const errText = await res.text();
+          alert('HTTP HATA ' + res.status + ': ' + errText.slice(0, 300));
+          return { ok: false, reason: 'http-error', pharmacies: [] };
+        }
+
+        const data = await res.json();
+        if (!data || data.success !== true || !Array.isArray(data.result)) {
+          // GEÇİCİ DEBUG: API'den ne döndüğünü görmek için. Sorun çözülünce bu satırı silin.
+          alert('API yanıtı beklenmedik: ' + JSON.stringify(data).slice(0, 300));
+          return { ok: false, reason: 'empty', pharmacies: [] };
+        }
 
         const pharmacies = data.result.map((item, idx) => {
           // CollectAPI bazı bölgelerde "loc" alanında "lat,lng" döndürür; her zaman garanti değildir.
@@ -493,6 +505,8 @@ try {
         return { ok: true, reason: 'ok', pharmacies };
       } catch (err) {
         console.error('Nöbetçi eczane verisi alınamadı:', err);
+        // GEÇİCİ DEBUG: ağ/istisna hatasını görmek için. Sorun çözülünce bu satırı silin.
+        alert('AĞ/İSTİSNA HATASI: ' + err.message);
         return { ok: false, reason: 'network-error', pharmacies: [] };
       }
     }
