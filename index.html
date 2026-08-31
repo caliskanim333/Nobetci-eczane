@@ -453,45 +453,54 @@
         });
 
         if (!res.ok) {
-          // GEÇİCİ DEBUG: gerçek hatayı görmek için. Sorun çözülünce bu satırı silin.
           const errText = await res.text();
-          alert('HTTP HATA ' + res.status + ': ' + errText.slice(0, 300));
+          console.error('HTTP hata ' + res.status + ':', errText.slice(0, 300));
           return { ok: false, reason: 'http-error', pharmacies: [] };
         }
 
         const data = await res.json();
-        if (!data || data.success !== true || !Array.isArray(data.result)) {
-          // GEÇİCİ DEBUG: API'den ne döndüğünü görmek için. Sorun çözülünce bu satırı silin.
-          alert('API yanıtı beklenmedik: ' + JSON.stringify(data).slice(0, 300));
+        // NosyAPI yanıt formatı: { status: "success", data: [ {...} ] }
+        // (CollectAPI'nin { success: true, result: [...] } formatından farklıdır.)
+        if (!data || data.status !== 'success' || !Array.isArray(data.data)) {
+          console.error('API yanıtı beklenmedik:', data);
           return { ok: false, reason: 'empty', pharmacies: [] };
         }
 
-        const pharmacies = data.result.map((item, idx) => {
-          // CollectAPI bazı bölgelerde "loc" alanında "lat,lng" döndürür; her zaman garanti değildir.
-          let lat = null, lng = null;
-          if (item.loc && typeof item.loc === 'string' && item.loc.includes(',')) {
-            const [latStr, lngStr] = item.loc.split(',');
-            const parsedLat = parseFloat(latStr);
-            const parsedLng = parseFloat(lngStr);
-            if (!isNaN(parsedLat) && !isNaN(parsedLng)) {
-              lat = parsedLat;
-              lng = parsedLng;
-            }
+        const pharmacies = data.data.map((item, idx) => {
+          // NosyAPI enlem/boylamı doğrudan sayısal latitude/longitude alanlarında döndürür.
+          const lat = (typeof item.latitude === 'number') ? item.latitude
+            : (item.latitude != null && !isNaN(parseFloat(item.latitude))) ? parseFloat(item.latitude) : null;
+          const lng = (typeof item.longitude === 'number') ? item.longitude
+            : (item.longitude != null && !isNaN(parseFloat(item.longitude))) ? parseFloat(item.longitude) : null;
+
+          // Nöbet saatlerini "pharmacyDutyStart/End" alanlarından okunabilir bir metne çeviriyoruz.
+          let dutyHoursText = 'Bugünün nöbetçi eczanesi';
+          const formatTime = (dt) => {
+            if (!dt || typeof dt !== 'string') return null;
+            const parts = dt.split(' ');
+            return parts.length > 1 ? parts[1].slice(0, 5) : null;
+          };
+          const startTime = formatTime(item.pharmacyDutyStart);
+          const endTime = formatTime(item.pharmacyDutyEnd);
+          if (startTime && endTime) {
+            dutyHoursText = startTime + ' - ' + endTime;
           }
 
+          const neighborhood = item.town || item.directions || '';
+
           return {
-            id: 'live-' + idx + '-' + (item.name || '').slice(0, 10),
-            name: item.name || 'İsimsiz Eczane',
+            id: 'live-' + idx + '-' + (item.pharmacyID || (item.pharmacyName || '').slice(0, 10)),
+            name: item.pharmacyName || 'İsimsiz Eczane',
             dutyStatus: 'on_duty',
             statusText: 'ŞU AN NÖBETÇİ',
-            dutyHoursText: 'Bugünün nöbetçi eczanesi',
-            city: city,
-            district: district,
-            neighborhood: item.dist || '',
+            dutyHoursText: dutyHoursText,
+            city: item.city || city,
+            district: item.district || district,
+            neighborhood: neighborhood,
             address: item.address || 'Adres bilgisi API tarafından sağlanmadı',
-            landmark: item.dist || '',
-            phone: item.phone || '',
-            formattedPhone: item.phone || '',
+            landmark: item.directions || '',
+            phone: item.phone || item.phone2 || '',
+            formattedPhone: item.phone || item.phone2 || '',
             lat: lat,
             lng: lng,
             distanceKm: (lat !== null && lng !== null) ? calculateDistance(userLocation.lat, userLocation.lng, lat, lng) : null,
@@ -503,8 +512,6 @@
         return { ok: true, reason: 'ok', pharmacies };
       } catch (err) {
         console.error('Nöbetçi eczane verisi alınamadı:', err);
-        // GEÇİCİ DEBUG: ağ/istisna hatasını görmek için. Sorun çözülünce bu satırı silin.
-        alert('AĞ/İSTİSNA HATASI: ' + err.message);
         return { ok: false, reason: 'network-error', pharmacies: [] };
       }
     }
