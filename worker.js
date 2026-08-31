@@ -1,61 +1,32 @@
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
- 
+
+    // Kendi Netlify sitenin adresiyle değiştir (https:// ile, sonunda / OLMADAN).
+    const ALLOWED_ORIGIN = 'https://nobetci-eczane-takip.netlify.app';
+
     // CORS preflight desteği
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
-          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'content-type'
+          'Access-Control-Allow-Headers': 'content-type, x-app-token'
         }
       });
     }
- 
-    const il = url.searchParams.get('il');
-    const ilce = url.searchParams.get('ilce');
- 
-    if (!il || !ilce) {
-      return new Response(JSON.stringify({ error: 'Missing il or ilce param' }), {
-        status: 400,
-        headers: { 'content-type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+
+    // Basit paylaşılan token kontrolü. Bu "gerçek" bir kimlik doğrulama
+    // değildir (frontend kodunda görünür) ama rastgele bot taramalarının
+    // ve otomatik URL keşfinin büyük çoğunluğunu eler. env.APP_TOKEN
+    // olarak Cloudflare'de secret şeklinde tanımlanmalı.
+    const clientToken = request.headers.get('x-app-token');
+    if (!env.APP_TOKEN || clientToken !== env.APP_TOKEN) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json', 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }
       });
     }
- 
-    // NosyAPI slug bekliyor (küçük harf, Türkçe karakter yok): "İstanbul" -> "istanbul",
-    // "Kadıköy" -> "kadikoy". Türkçe harfleri sadeleştirip slug'a çeviriyoruz.
-    const toSlug = (s) => s
-      .toLocaleLowerCase('tr')
-      .replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i')
-      .replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u')
-      .replace(/[^a-z0-9]+/g, '');
- 
-    const citySlug = toSlug(il);
-    const districtSlug = toSlug(ilce);
- 
-    // ÖNEMLİ: Hedef URL burada, worker içinde, sabit host'a karşı oluşturuluyor.
-    // Dışarıdan keyfi bir "url" parametresi kabul EDİLMİYOR — bu sayede worker
-    // açık bir proxy olarak kötüye kullanılamaz; sadece NosyAPI'nin
-    // pharmacies-on-duty endpoint'ine, sadece city/district parametreleriyle istek atabilir.
-    const target = `https://www.nosyapi.com/apiv2/service/pharmacies-on-duty?city=${encodeURIComponent(citySlug)}&district=${encodeURIComponent(districtSlug)}`;
- 
-    const upstream = await fetch(target, {
-      headers: {
-        'Authorization': `Bearer ${env.API_KEY}`,
-        'content-type': 'application/json'
-      }
-    });
- 
-    const body = await upstream.text();
- 
-    return new Response(body, {
-      status: upstream.status,
-      headers: {
-        'content-type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  }
-};
- 
+
+    // ================= IP BAŞINA HIZ SINIRI (RATE LIMIT) =================
+    // Aynı IP adresi 1 dakika içinde RATE_LIMIT_MAX'ten f
