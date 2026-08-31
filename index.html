@@ -442,7 +442,12 @@
 
       const il = normalizeTr(city);
       const ilce = normalizeTr(cleanDistrictName(district));
-      const url = `https://api.collectapi.com/health/dutyPharmacy?il=${encodeURIComponent(il)}&ilce=${encodeURIComponent(ilce)}`;
+      // GEÇİCİ TEST: CollectAPI'nin CORS izni vermemesi nedeniyle tarayıcıdan
+      // doğrudan çağrı engelleniyor. Bu, isteği bir CORS proxy üzerinden
+      // yönlendirerek engeli aşan geçici bir test amaçlıdır; kalıcı çözüm
+      // kendi sunucu/proxy'nizi kurmaktır.
+      const realUrl = `https://api.collectapi.com/health/dutyPharmacy?il=${encodeURIComponent(il)}&ilce=${encodeURIComponent(ilce)}`;
+      const url = `https://corsproxy.io/?url=${encodeURIComponent(realUrl)}`;
 
       try {
         const res = await fetch(url, {
