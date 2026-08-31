@@ -447,24 +447,14 @@
       // yönlendirerek engeli aşan geçici bir test amaçlıdır; kalıcı çözüm
       // kendi sunucu/proxy'nizi kurmaktır.
       const realUrl = `https://api.collectapi.com/health/dutyPharmacy?il=${encodeURIComponent(il)}&ilce=${encodeURIComponent(ilce)}`;
-      const url = `https://corsproxy.io/?url=${encodeURIComponent(realUrl)}`;
+const url = `https://ancient-dream-01d5.caliskanim333.workers.dev/?url=${encodeURIComponent(realUrl)}`;
 
-      try {
-        const res = await fetch(url, {
-          headers: {
-            'content-type': 'application/json',
-            'authorization': APP_CONFIG.COLLECTAPI_KEY
-          }
-        });
-
-        if (!res.ok) {
-          return { ok: false, reason: 'http-error', pharmacies: [] };
-        }
-
-        const data = await res.json();
-        if (!data || data.success !== true || !Array.isArray(data.result)) {
-          return { ok: false, reason: 'empty', pharmacies: [] };
-        }
+try {
+  const res = await fetch(url, {
+    headers: {
+      'content-type': 'application/json'
+    }
+  });
 
         const pharmacies = data.result.map((item, idx) => {
           // CollectAPI bazı bölgelerde "loc" alanında "lat,lng" döndürür; her zaman garanti değildir.
