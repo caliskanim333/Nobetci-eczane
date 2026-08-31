@@ -1,5 +1,5 @@
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     const target = url.searchParams.get('url');
 
@@ -9,7 +9,7 @@ export default {
 
     const upstream = await fetch(target, {
       headers: {
-        'authorization': 'apikey 4cbBvX2DdvrQLQX0QFjbkC',
+        'authorization': `apikey ${env.API_KEY}`,
         'content-type': 'application/json'
       }
     });
