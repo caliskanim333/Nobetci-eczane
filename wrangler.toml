@@ -1,3 +1,6 @@
 name = "ancient-dream-01d5"
 main = "worker.js"
 compatibility_date = "2026-08-31"
+
+[vars]
+ALLOWED_ORIGIN = "https://nobetci-eczane-takip.netlify.app"
