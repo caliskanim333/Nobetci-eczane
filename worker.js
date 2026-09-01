@@ -1,3 +1,14 @@
+// ---- GEÇİCİ DEBUG 2: Balıkesir ilçe slug listesini gör ----
+if (debugUrl.searchParams.get('debug') === '2') {
+  const citiesUrl = new URL('https://www.nosyapi.com/apiv2/service/pharmacies-on-duty/cities');
+  citiesUrl.searchParams.set('city', 'balikesir');
+  citiesUrl.searchParams.set('apiKey', env.API_KEY);
+  const citiesRes = await fetch(citiesUrl.toString());
+  const citiesData = await citiesRes.json();
+  return new Response(JSON.stringify(citiesData, null, 2), {
+    headers: { 'content-type': 'application/json; charset=utf-8' }
+  });
+}
 // ================= Nöbetçi Eczane - Cloudflare Worker =================
 // Görevi: frontend'den gelen il/ilce isteğini alıp Nosyapi'nin
 // "Nöbetçi Eczane API"sine iletmek. (https://www.nosyapi.com/api/nobetci-eczane)
