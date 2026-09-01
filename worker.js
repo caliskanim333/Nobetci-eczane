@@ -84,6 +84,21 @@ export default {
     // CORS header'larına yazacağımız origin: sadece izinliyse geri yansıtıyoruz.
     const echoOrigin = originAllowed ? requestOrigin : null;
 
+    // ---- GEÇİCİ DEBUG (teşhis bittiğinde bu bloğu silin) ----
+    const debugUrl = new URL(request.url);
+    if (debugUrl.searchParams.get('debug') === '1') {
+      return new Response(JSON.stringify({
+        receivedOrigin: request.headers.get('origin'),
+        normalizedOrigin: requestOrigin,
+        allowedOrigins: allowedOrigins,
+        match: originAllowed,
+        method: request.method
+      }, null, 2), {
+        headers: { 'content-type': 'application/json; charset=utf-8' }
+      });
+    }
+    // ---- /GEÇİCİ DEBUG ----
+
     if (request.method === 'OPTIONS') {
       // Preflight isteği. İzinli değilse CORS header'ı vermeden 403 dönüyoruz
       // ki tarayıcı asıl isteği hiç göndermesin.
