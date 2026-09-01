@@ -96,6 +96,19 @@ export default {
         headers: { 'content-type': 'application/json; charset=utf-8' }
       });
     }
+
+    // ---- GEÇİCİ DEBUG 3: Altıeylül için Nosyapi ham cevabı ----
+    if (debugUrl.searchParams.get('debug') === '3') {
+      const testUrl = new URL('https://www.nosyapi.com/apiv2/service/pharmacies-on-duty');
+      testUrl.searchParams.set('city', 'balikesir');
+      testUrl.searchParams.set('district', 'altieylul');
+      testUrl.searchParams.set('apiKey', env.API_KEY);
+      const testRes = await fetch(testUrl.toString());
+      const testData = await testRes.json();
+      return new Response(JSON.stringify({ httpStatus: testRes.status, body: testData }, null, 2), {
+        headers: { 'content-type': 'application/json; charset=utf-8' }
+      });
+    }
     // ---- /GEÇİCİ DEBUG ----
 
     if (request.method === 'OPTIONS') {
